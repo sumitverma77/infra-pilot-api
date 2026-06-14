@@ -85,6 +85,7 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
                     <imageName>ghcr.io/sumitverma/infrapilot</imageName>
+                    <classifier>exec</classifier>
                     <layers>
                         <enabled>true</enabled>
                     </layers>

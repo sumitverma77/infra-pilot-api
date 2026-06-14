@@ -41,15 +41,13 @@ resource "aws_ecs_task_definition" "app" {
         { name = "INFRAPILOT_GIT_COMMIT_SHA", value = var.git_commit_sha },
         { name = "INFRAPILOT_BUILD_TIMESTAMP", value = var.build_timestamp },
         { name = "INFRAPILOT_HOSTNAME", value = var.hostname },
-        { name = "INFRAPILOT_ENVIRONMENT", value = var.runtime_environment },
-        { name = "SPRING_DATASOURCE_URL", value = var.db_url },
-        { name = "SPRING_DATASOURCE_USERNAME", value = var.db_username },
-        { name = "SPRING_REDIS_HOST", value = var.redis_host },
-        { name = "SPRING_REDIS_PORT", value = tostring(var.redis_port) }
-      ]
-      secrets = [
-        { name = "SPRING_DATASOURCE_PASSWORD", valueFrom = aws_secretsmanager_secret.database_password.arn },
-        { name = "SPRING_REDIS_PASSWORD", valueFrom = aws_secretsmanager_secret.redis_password.arn }
+        { name = "INFRAPILOT_ENVIRONMENT", value = var.environment },
+        { name = "SPRING_DATASOURCE_URL", value = "jdbc:postgresql://localhost:5432/infrapilot" },
+        { name = "SPRING_DATASOURCE_USERNAME", value = "infrapilot" },
+        { name = "SPRING_DATASOURCE_PASSWORD", value = "infrapilot" },
+        { name = "SPRING_REDIS_HOST", value = "localhost" },
+        { name = "SPRING_REDIS_PORT", value = "6379" },
+        { name = "SPRING_REDIS_PASSWORD", value = "infrapilot" }
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -59,12 +57,51 @@ resource "aws_ecs_task_definition" "app" {
           awslogs-stream-prefix = "app"
         }
       }
-      healthCheck = {
-        command     = ["CMD-SHELL", "exit 0"]
-        interval    = 30
-        timeout     = 5
-        retries     = 3
-        startPeriod = 60
+    },
+    {
+      name      = "postgres"
+      image     = "postgres:16-alpine"
+      essential = true
+      portMappings = [
+        {
+          containerPort = 5432
+          hostPort      = 5432
+          protocol      = "tcp"
+        }
+      ]
+      environment = [
+        { name = "POSTGRES_DB", value = "infrapilot" },
+        { name = "POSTGRES_USER", value = "infrapilot" },
+        { name = "POSTGRES_PASSWORD", value = "infrapilot" }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.app.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "postgres"
+        }
+      }
+    },
+    {
+      name      = "redis"
+      image     = "redis:7.4-alpine"
+      essential = true
+      command   = ["redis-server", "--appendonly", "yes", "--requirepass", "infrapilot"]
+      portMappings = [
+        {
+          containerPort = 6379
+          hostPort      = 6379
+          protocol      = "tcp"
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.app.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "redis"
+        }
       }
     }
   ])
@@ -80,19 +117,18 @@ resource "aws_ecs_service" "app" {
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
   enable_execute_command             = true
-  health_check_grace_period_seconds   = 60
-  propagate_tags                     = "SERVICE"
+  health_check_grace_period_seconds  = 120
 
   network_configuration {
-    subnets         = aws_subnet.private[*].id
-    security_groups = [aws_security_group.ecs.id]
-    assign_public_ip = false
+    subnets          = aws_subnet.public[*].id
+    security_groups  = [aws_security_group.ecs.id]
+    assign_public_ip = true
   }
 
   load_balancer {
     target_group_arn = aws_lb_target_group.app.arn
-    container_name    = var.project_name
-    container_port    = var.container_port
+    container_name   = var.project_name
+    container_port   = var.container_port
   }
 
   depends_on = [

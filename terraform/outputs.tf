@@ -17,15 +17,3 @@ output "ecs_cluster_name" {
 output "ecs_service_name" {
   value = aws_ecs_service.app.name
 }
-
-output "application_secret_arn" {
-  value = aws_secretsmanager_secret.application_metadata.arn
-}
-
-output "database_password_secret_arn" {
-  value = aws_secretsmanager_secret.database_password.arn
-}
-
-output "redis_password_secret_arn" {
-  value = aws_secretsmanager_secret.redis_password.arn
-}

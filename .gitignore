@@ -31,3 +31,15 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+apply-output.txt
+build.log
+
+# Optional
+apply-output.txt
+build.log

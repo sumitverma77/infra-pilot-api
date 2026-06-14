@@ -28,12 +28,6 @@ variable "public_subnet_cidrs" {
   default     = ["10.50.0.0/24", "10.50.1.0/24"]
 }
 
-variable "private_subnet_cidrs" {
-  description = "CIDR blocks for private subnets"
-  type        = list(string)
-  default     = ["10.50.10.0/24", "10.50.11.0/24"]
-}
-
 variable "availability_zones" {
   description = "AZs used by the stack"
   type        = list(string)
@@ -60,13 +54,13 @@ variable "desired_count" {
 variable "task_cpu" {
   description = "Fargate task CPU units"
   type        = number
-  default     = 512
+  default     = 1024
 }
 
 variable "task_memory" {
   description = "Fargate task memory in MiB"
   type        = number
-  default     = 1024
+  default     = 2048
 }
 
 variable "app_name" {
@@ -83,42 +77,19 @@ variable "app_version" {
 variable "git_commit_sha" {
   description = "Git commit SHA exposed to the container"
   type        = string
+  default     = "unknown"
 }
 
 variable "build_timestamp" {
   description = "Build timestamp exposed to the container"
   type        = string
+  default     = "unknown"
 }
 
 variable "hostname" {
   description = "Hostname value exposed to the container"
   type        = string
-}
-
-variable "runtime_environment" {
-  description = "Logical runtime environment exposed to the container"
-  type        = string
-}
-
-variable "db_url" {
-  description = "JDBC URL for PostgreSQL"
-  type        = string
-}
-
-variable "db_username" {
-  description = "PostgreSQL username"
-  type        = string
-}
-
-variable "redis_host" {
-  description = "Redis host name"
-  type        = string
-}
-
-variable "redis_port" {
-  description = "Redis port"
-  type        = number
-  default     = 6379
+  default     = "infrapilot-aws"
 }
 
 variable "acm_certificate_arn" {
@@ -131,7 +102,7 @@ variable "tags" {
   description = "Common resource tags"
   type        = map(string)
   default = {
-    Project = "InfraPilot"
+    Project   = "InfraPilot"
     ManagedBy = "Terraform"
   }
 }

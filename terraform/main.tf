@@ -29,15 +29,3 @@ data "aws_availability_zones" "available" {
 locals {
   name_prefix = "${var.project_name}-${var.environment}"
 }
-
-resource "aws_secretsmanager_secret" "application_metadata" {
-  name_prefix = "${local.name_prefix}/application"
-}
-
-resource "aws_secretsmanager_secret" "database_password" {
-  name_prefix = "${local.name_prefix}/database-password"
-}
-
-resource "aws_secretsmanager_secret" "redis_password" {
-  name_prefix = "${local.name_prefix}/redis-password"
-}

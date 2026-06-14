@@ -30,7 +30,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   deploy:
@@ -40,8 +39,9 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
 
       - name: Describe current task definition
         id: task-def
@@ -51,11 +51,13 @@ jobs:
             --query taskDefinition > task-def.json
 
       - name: Render new task definition revision
-        env:
-          IMAGE_URI: ${{ inputs.image_uri }}
         run: |
-          jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy,.deregisteredAt)
-            | .containerDefinitions[0].image = env.IMAGE_URI' task-def.json > task-def-rendered.json
+          jq --arg img "${{ inputs.image_uri }}" \
+             --arg name "${{ inputs.container_name }}" \
+             'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy,.deregisteredAt)
+              | .containerDefinitions |= map(if .name == $name then .image = $img else . end)' \
+             task-def.json > task-def-rendered.json
+          
           aws ecs register-task-definition --cli-input-json file://task-def-rendered.json > task-def-register.json
           echo "TASK_DEFINITION_ARN=$(jq -r '.taskDefinition.taskDefinitionArn' task-def-register.json)" >> "$GITHUB_ENV"
 
