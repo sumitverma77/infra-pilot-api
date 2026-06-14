@@ -184,6 +184,8 @@ Terraform provisions:
 - Secrets Manager secrets
 - IAM task execution and task roles
 
+See the full step-by-step guide in [docs/terraform.md](docs/terraform.md).
+
 Example:
 
 ```bash
