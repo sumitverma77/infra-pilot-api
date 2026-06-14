@@ -1,0 +1,25 @@
+{
+  "uid": "infrapilot-cpu",
+  "title": "InfraPilot CPU",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Process CPU Usage",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "process_cpu_usage", "legendFormat": "cpu usage"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "System CPU Usage",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "system_cpu_usage", "legendFormat": "system cpu"}
+      ]
+    }
+  ]
+}

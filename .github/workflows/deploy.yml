@@ -1,0 +1,79 @@
+name: Deploy to ECS
+
+on:
+  workflow_dispatch:
+    inputs:
+      cluster_name:
+        description: ECS cluster name
+        required: true
+        type: string
+      service_name:
+        description: ECS service name
+        required: true
+        type: string
+      task_definition_family:
+        description: ECS task definition family
+        required: true
+        type: string
+      container_name:
+        description: Container name inside the task definition
+        required: true
+        type: string
+      image_uri:
+        description: Full image URI to deploy
+        required: true
+        type: string
+      alb_dns_name:
+        description: Application Load Balancer DNS name
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+
+      - name: Describe current task definition
+        id: task-def
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "${{ inputs.task_definition_family }}" \
+            --query taskDefinition > task-def.json
+
+      - name: Render new task definition revision
+        env:
+          IMAGE_URI: ${{ inputs.image_uri }}
+        run: |
+          jq 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy,.deregisteredAt)
+            | .containerDefinitions[0].image = env.IMAGE_URI' task-def.json > task-def-rendered.json
+          aws ecs register-task-definition --cli-input-json file://task-def-rendered.json > task-def-register.json
+          echo "TASK_DEFINITION_ARN=$(jq -r '.taskDefinition.taskDefinitionArn' task-def-register.json)" >> "$GITHUB_ENV"
+
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster "${{ inputs.cluster_name }}" \
+            --service "${{ inputs.service_name }}" \
+            --task-definition "$TASK_DEFINITION_ARN" \
+            --force-new-deployment
+
+      - name: Wait for service stability
+        run: |
+          aws ecs wait services-stable \
+            --cluster "${{ inputs.cluster_name }}" \
+            --services "${{ inputs.service_name }}"
+
+      - name: Verify health checks
+        run: |
+          curl -fsS "http://${{ inputs.alb_dns_name }}/actuator/health/readiness"
+          curl -fsS "http://${{ inputs.alb_dns_name }}/api/v1/health"

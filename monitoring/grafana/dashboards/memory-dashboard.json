@@ -1,0 +1,25 @@
+{
+  "uid": "infrapilot-memory",
+  "title": "InfraPilot Memory",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Heap Used",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "jvm_memory_used_bytes{area=\"heap\"}", "legendFormat": "heap used"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Non-Heap Used",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "jvm_memory_used_bytes{area=\"nonheap\"}", "legendFormat": "non-heap used"}
+      ]
+    }
+  ]
+}

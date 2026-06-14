@@ -1,0 +1,12 @@
+.git
+.github
+.idea
+.vscode
+target
+application/target
+terraform/.terraform
+terraform/*.tfstate*
+docs
+monitoring/grafana/data
+*.log
+README.md

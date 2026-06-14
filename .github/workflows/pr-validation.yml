@@ -1,0 +1,73 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-coverage:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: infrapilot
+          POSTGRES_USER: infrapilot
+          POSTGRES_PASSWORD: infrapilot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U infrapilot -d infrapilot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+
+      - name: Capture build timestamp
+        run: echo "BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Build, test, and measure coverage
+        env:
+          INFRAPILOT_APP_NAME: InfraPilot
+          INFRAPILOT_APP_VERSION: ${{ github.event.pull_request.head.sha }}
+          INFRAPILOT_GIT_COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
+          INFRAPILOT_BUILD_TIMESTAMP: ${{ env.BUILD_TIMESTAMP }}
+          INFRAPILOT_HOSTNAME: github-actions
+          INFRAPILOT_ENVIRONMENT: pull-request
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/infrapilot
+          SPRING_DATASOURCE_USERNAME: infrapilot
+          SPRING_DATASOURCE_PASSWORD: infrapilot
+          SPRING_REDIS_HOST: localhost
+          SPRING_REDIS_PORT: 6379
+          SPRING_REDIS_PASSWORD: infrapilot
+        run: mvn -B -pl application -am clean verify
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: application/target/site/jacoco

@@ -1,0 +1,25 @@
+{
+  "uid": "infrapilot-jvm",
+  "title": "InfraPilot JVM",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "JVM Memory Used",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "sum(jvm_memory_used_bytes) by (area)", "legendFormat": "{{area}}"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "JVM Threads",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "jvm_threads_live_threads", "legendFormat": "live"}
+      ]
+    }
+  ]
+}
