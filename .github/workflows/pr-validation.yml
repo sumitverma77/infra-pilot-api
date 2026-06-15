@@ -4,6 +4,12 @@ on:
   pull_request:
     branches:
       - main
+      - stage
+    paths:
+      - 'application/**'
+      - 'docker/**'
+      - 'pom.xml'
+      - '.github/workflows/pr-validation.yml'
 
 permissions:
   contents: read
