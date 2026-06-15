@@ -72,6 +72,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: build-and-push
+    environment: ${{ github.ref_name == 'main' && 'prod' || 'stage' }}
 
     steps:
       - name: Configure AWS credentials
