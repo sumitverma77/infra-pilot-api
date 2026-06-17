@@ -62,7 +62,7 @@ jobs:
       - name: Build and push image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: infrapilot
+          ECR_REPOSITORY: ${{ github.ref_name == 'main' && 'infrapilot-prod' || 'infrapilot-stage' }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build -f docker/Dockerfile -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" -t "$ECR_REGISTRY/$ECR_REPOSITORY:latest" .
@@ -89,15 +89,16 @@ jobs:
             echo "ECS_SERVICE=${{ vars.PROD_ECS_SERVICE }}" >> "$GITHUB_ENV"
             echo "TASK_DEF_FAMILY=${{ vars.PROD_TASK_DEF_FAMILY }}" >> "$GITHUB_ENV"
             echo "ALB_DNS_NAME=${{ vars.PROD_ALB_DNS }}" >> "$GITHUB_ENV"
+            echo "ECR_REPOSITORY=infrapilot-prod" >> "$GITHUB_ENV"
           else
             echo "ECS_CLUSTER=${{ vars.STAGE_ECS_CLUSTER }}" >> "$GITHUB_ENV"
             echo "ECS_SERVICE=${{ vars.STAGE_ECS_SERVICE }}" >> "$GITHUB_ENV"
             echo "TASK_DEF_FAMILY=${{ vars.STAGE_TASK_DEF_FAMILY }}" >> "$GITHUB_ENV"
             echo "ALB_DNS_NAME=${{ vars.STAGE_ALB_DNS }}" >> "$GITHUB_ENV"
+            echo "ECR_REPOSITORY=infrapilot-stage" >> "$GITHUB_ENV"
           fi
           
           echo "CONTAINER_NAME=infrapilot" >> "$GITHUB_ENV"
-          echo "ECR_REPOSITORY=infrapilot" >> "$GITHUB_ENV"
           echo "ECR_REGISTRY=${{ needs.build-and-push.outputs.registry }}" >> "$GITHUB_ENV"
 
       - name: Describe current task definition
