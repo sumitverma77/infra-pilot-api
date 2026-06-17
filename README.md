@@ -1,277 +1,124 @@
-# InfraPilot
+# InfraPilot API - Automated Software Delivery & CI/CD Platform
 
-InfraPilot is a production-grade cloud-native platform showcase built to demonstrate modern Java backend engineering, AWS infrastructure, CI/CD automation, observability, security, and containerization.
+InfraPilot API is a production-grade cloud-native Spring Boot application showcase designed to demonstrate modern software delivery automation, continuous integration (CI), continuous deployment (CD), and containerization best practices.
 
-It is intentionally not a business application. The API surface is deliberately small so the repository can focus on platform concerns rather than domain complexity.
+The primary focus of this repository is on the **automated release engineering pipeline**—taking code from a pull request, validating it under realistic database conditions, packaging it into a minimal-footprint container, and deploying it with zero downtime to AWS ECS.
 
 ---
 
-## 🚀 What We Achieved & Core Architecture
+## 🚀 Software Delivery & CI/CD Pipelines
 
-With this codebase, we have designed and provisioned a **high-availability, zero-baseline-cost AWS cloud infrastructure** by running PostgreSQL and Redis as sidecar containers inside a serverless ECS Fargate task:
+Our software delivery lifecycle is governed by automated pipelines in `.github/workflows/` that coordinate continuous testing and target-environment deployments.
 
 ```mermaid
-flowchart LR
-  Internet((Internet)) --> ALB[Application Load Balancer]
-  ALB --> ECS[ECS Fargate Task]
+flowchart TD
+  Developer[Developer pushes code] --> Trigger{Branch Target}
   
-  subgraph Fargate["Fargate Task (Loopback Network)"]
-    App[Spring Boot App :8080]
-    PostgreSQL[(Postgres Sidecar :5432)]
-    Redis[(Redis Sidecar :6379)]
+  Trigger -->|Pull Request| CI[1. PR Validation Pipeline]
+  Trigger -->|Push to stage| CDStage[2. CD to Staging]
+  Trigger -->|Push to main| CDProd[3. CD to Production]
+  
+  subgraph CI_Pipeline ["PR Validation CI"]
+    CI --> Setup[Setup Java 21 & Maven Cache]
+    Setup --> Services[Spawn Postgres & Redis Sidecars]
+    Services --> Verify[mvn clean verify]
+    Verify --> Coverage[JaCoCo Test Coverage Report]
+  end
+
+  subgraph CD_Pipeline ["Continuous Deployment CD"]
+    CDStage --> BuildS[Build & Package JAR]
+    CDProd --> BuildP[Build & Package JAR]
     
-    App -->|localhost:5432| PostgreSQL
-    App -->|localhost:6379| Redis
+    BuildS --> DockerS[Docker Build & Push ECR stage]
+    BuildP --> DockerP[Docker Build & Push ECR prod]
+    
+    DockerS --> ECSS[Update ECS Service stage]
+    DockerP --> ECSP[Update ECS Service prod]
+    
+    ECSS --> QueryS[Dynamic ALB DNS Resolution]
+    ECSP --> QueryP[Dynamic ALB DNS Resolution]
+    
+    QueryS --> HealthS[Health Check Actuator Verify]
+    QueryP --> HealthP[Health Check Actuator Verify]
   end
 ```
 
-### Core Value Proposition & Achievements:
-* **Zero Database Base Cost:** PostgreSQL and Redis run directly inside the Fargate task memory space, bypassing the high monthly fees of AWS RDS ($15+/mo) and AWS ElastiCache ($15+/mo).
-* **NAT Gateway Avoidance:** By placing Fargate tasks directly in public subnets protected by ingress-restricted Security Groups, we avoid the baseline cost of an AWS NAT Gateway ($32/mo).
-* **Enterprise Security Posture:** Uses a **multi-stage distroless build** containing *only* the compiled application jar and its JDK runtime. No shell, package manager, or system utilities exist inside the container, reducing the remote code execution exploit surface to nearly zero.
-* **Granular CI/CD Triggers:** Integrated path-filtering so pushing markdown or Terraform changes does not trigger Java compiles, keeping build queues fast and cost-efficient.
+### 1. PR Validation Pipeline (`pr-validation.yml`)
+Runs automatically on pull requests targeting `stage` or `main`.
+* **Database Sidecars**: Spawns actual containerized PostgreSQL 16 and Redis 7.4 databases in the runner workspace using GitHub Actions Services.
+* **Continuous Integration**: Executes integration tests (`*IT.java`) against these running database engines.
+* **Quality Gates**: Compiles code using JDK 21 and measures test coverage using **JaCoCo**, uploading reports as build artifacts.
+
+### 2. Automated CD Pipeline (`ci-cd-auto.yml`)
+Runs on direct commits or merged pull requests into target environment branches.
+* **Environment Mapping**: 
+  * `stage` branch $\rightarrow$ Staging (`infrapilot-stage` ECR / ECS Cluster)
+  * `main` branch $\rightarrow$ Production (`infrapilot-prod` ECR / ECS Cluster)
+* **Secure Containerization**: Builds a multi-stage distroless Docker image containing *only* the compiled application jar and Java runtime. No shell or package manager is present, reducing the security attack surface.
+* **Self-Healing Deployments**:
+  * Registers a new revision of the Fargate Task Definition with the built image tag.
+  * Triggers an ECS rolling update.
+  * Queries AWS CLI (`aws elbv2 describe-load-balancers`) dynamically to retrieve the live Load Balancer DNS name, bypassing hardcoded variables.
+  * Verifies health status via `/actuator/health/readiness` and `/api/v1/health` before completing the workflow.
+
+### 3. Manual Promotion Pipeline (`deploy.yml`)
+Allows manual trigger of deployments via `workflow_dispatch` in the GitHub UI, prompting for:
+* Target environment selection (`stage` or `prod`).
+* Target Docker image tag (e.g. `latest` or specific git commit SHA).
 
 ---
 
-## 🛠️ What You Will Learn From This Repository
+## 💻 Tech Stack & Architecture
 
-Maintaining this repository teaches you critical skills required of **Staff Cloud Engineers** and **SREs**:
-1. **Infrastructure as Code (IaC):** Writing modular, variable-driven Terraform configs, managing resource dependencies, and understanding state lifecycles.
-2. **Docker Optimization:** Using multi-stage caching, distroless images, non-root execution, and Fargate multi-container networking.
-3. **Advanced CI/CD Automation:** Designing branch-to-environment mapping (`main` to `prod`, `stage` to `stage` environment), GitOps practices, and environment parameter injection.
-4. **Cloud Operations & Observability:** Configuring ALB health check target groups, grace periods, CloudWatch logging streams, and Actuator metrics endpoints.
-
----
-
-## Architecture Overview
-
-```mermaid
-flowchart LR
-  GitHub[GitHub] --> Actions[GitHub Actions]
-  Actions --> ECR[Amazon ECR]
-  ECR --> ECS[Amazon ECS Fargate]
-  ECS --> ALB[Application Load Balancer]
-  ALB --> App[InfraPilot Application]
-  App --> PostgreSQL[(PostgreSQL)]
-  App --> Redis[(Redis)]
-  Prometheus[Prometheus] --> Grafana[Grafana]
-```
-
-## CI/CD Pipeline
-
-```mermaid
-flowchart LR
-  Dev[Developer] --> PR[Pull Request]
-  PR --> Build[Build]
-  Build --> Test[Test]
-  Test --> Docker[Docker Build]
-  Docker --> ECR[Amazon ECR]
-  ECR --> ECS[Amazon ECS]
-```
-
-## Deployment Flow
-
-```mermaid
-sequenceDiagram
-  participant Dev as Developer
-  participant GH as GitHub Actions
-  participant ECR as Amazon ECR
-  participant ECS as Amazon ECS
-  participant ALB as Application Load Balancer
-  participant App as InfraPilot App
-
-  Dev->>GH: Trigger deployment workflow
-  GH->>ECR: Push image tagged with commit SHA
-  GH->>ECS: Register task definition revision
-  GH->>ECS: Update ECS service
-  ECS->>ALB: Replace tasks with rolling deployment
-  ALB->>App: Route traffic to healthy task set
-  GH->>ALB: Verify readiness and health endpoints
-```
-
-## AWS Infrastructure Diagram
-
-```mermaid
-flowchart TB
-  Internet((Internet)) --> ALB[Application Load Balancer]
-  ALB --> ECS[ECS Fargate Service]
-  ECS --> Public1[Public Subnet A]
-  ECS --> Public2[Public Subnet B]
-  Public1 --> IGW[Internet Gateway]
-  Public2 --> IGW
-  ECS --> Logs[CloudWatch Log Group]
-  ECR[Amazon ECR] --> ECS
-```
-
-## Monitoring Architecture
-
-```mermaid
-flowchart LR
-  App[Spring Boot App] --> Actuator[/Actuator Metrics/]
-  Actuator --> Prometheus[Prometheus]
-  Prometheus --> Grafana[Grafana]
-  App --> CloudWatch[CloudWatch Logs]
-```
-
-## Repository Layout
-
-```text
-infra-pilot
-├── application
-├── docker
-├── terraform
-├── monitoring
-├── docs
-├── .github
-└── README.md
-```
+* **Framework**: Spring Boot 3.4.6, Java 21 (Eclipse Temurin)
+* **Build System**: Maven (parent project with modular `application` subdirectory)
+* **Database Migrations**: Flyway (manages database schema evolution on startup)
+* **Metrics & Observability**: Spring Boot Actuator, Micrometer Prometheus metrics
+* **Container Base**: Google Distroless Java 21 Debian 12 image
 
 ---
 
-## Local Setup
+## 🛠️ Local Development & Setup
 
 ### Prerequisites
+* JDK 21 (Temurin recommended)
+* Maven 3.9+
+* Docker Desktop (for Compose orchestration)
 
-- Java 21
-- Maven 3.9+
-- Docker Desktop
-- PostgreSQL and Redis if you want to run the application outside Compose
-
-### Run locally with Maven
-
-Set the required environment variables first:
-
-- `INFRAPILOT_APP_NAME`
-- `INFRAPILOT_APP_VERSION`
-- `INFRAPILOT_GIT_COMMIT_SHA`
-- `INFRAPILOT_BUILD_TIMESTAMP`
-- `INFRAPILOT_HOSTNAME`
-- `INFRAPILOT_ENVIRONMENT`
-- `SPRING_DATASOURCE_URL`
-- `SPRING_DATASOURCE_USERNAME`
-- `SPRING_DATASOURCE_PASSWORD`
-- `SPRING_REDIS_HOST`
-- `SPRING_REDIS_PORT`
-- `SPRING_REDIS_PASSWORD`
-
-Then run:
-
+### 1. Running Locally via Maven
+Ensure you have running instances of PostgreSQL and Redis locally, then export the following variables:
 ```bash
-mvn -pl application -am spring-boot:run
+export INFRAPILOT_ENVIRONMENT=local
+export SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/infrapilot
+export SPRING_DATASOURCE_USERNAME=postgres
+export SPRING_DATASOURCE_PASSWORD=postgres
+export SPRING_REDIS_HOST=localhost
+export SPRING_REDIS_PORT=6379
 ```
 
-### Health check
-
+Run the application:
 ```bash
-curl http://localhost:8080/api/v1/health
+./mvnw -pl application -am spring-boot:run
 ```
 
-## Docker Setup
-
-Build and start the full local stack:
-
+### 2. Running Locally via Docker Compose
+To boot the full application environment (App + Postgres + Redis + Prometheus + Grafana):
 ```bash
 docker compose up --build
 ```
-
-Services:
-
-- Application: `http://localhost:8080`
-- Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3000`
-
-Default local credentials for Grafana:
-
-- Username: `admin`
-- Password: `admin`
-
-## Terraform Setup
-
-Terraform provisions:
-
-- VPC, 2 public subnets, route tables, IGW
-- Security groups for ALB and ECS tasks
-- ECR repository
-- ECS cluster and Fargate service
-- Application Load Balancer & Target Group
-- CloudWatch log group
-- IAM task execution and task roles
-
-See the full step-by-step guide in [docs/terraform.md](docs/terraform.md).
-
-Deploy with minimal inputs:
-
-```bash
-cd terraform
-terraform init
-terraform plan \
-  -var="container_image=516292808313.dkr.ecr.us-east-1.amazonaws.com/infrapilot:latest" \
-  -var="app_version=1.0.0"
-```
-
-## AWS Deployment Guide
-
-1. Apply Terraform.
-2. Push your Spring Boot Docker image to ECR.
-3. Trigger the deployment workflow in GitHub Actions.
-4. Confirm the ECS service reaches `stable`.
-5. Verify `/actuator/health/readiness` and `/api/v1/health` through the ALB.
-
-### Rolling deployment strategy
-
-- ECS service uses rolling updates.
-- Minimum healthy percent is 100.
-- Maximum percent is 200.
-- ALB health checks use `/actuator/health/readiness`.
-- Deployment fails if health checks do not recover.
-
-### Rollback
-
-- Re-run the deployment workflow in GitHub Actions with the previous image tag.
-- Or update the ECS service to the prior task definition revision.
-- ECS and ALB health checks will drain unhealthy tasks before routing traffic to the reverted revision.
-
-## Monitoring Guide
-
-- Spring Boot Actuator exposes health, info, metrics, and Prometheus endpoints.
-- Prometheus scrapes the application at `/actuator/prometheus`.
-- Grafana dashboards are provisioned from `monitoring/grafana/dashboards`.
-
-Dashboards included:
-
-- JVM
-- Memory
-- CPU
-- HTTP Requests
-- Error Rate
-
-## CI/CD Guide
-
-We have set up an automated GitOps and SRE validation pipeline:
-
-* **PR Validation ([pr-validation.yml](.github/workflows/pr-validation.yml)):** Runs on PR pushes modifying Java files. Sets up Postgres/Redis test containers, compiles the project, and runs verify checks.
-* **Terraform Check ([terraform-check.yml](.github/workflows/terraform-check.yml)):** Runs on pushes modifying `terraform/**`. Validates code formatting and syntax checks.
-* **Auto Deployment ([ci-cd-auto.yml](.github/workflows/ci-cd-auto.yml)):** Automatically builds, tags, pushes the image to ECR, and deploys the new revision to ECS Fargate on pushes to `main` (for `prod`) and `stage` (for `stage`).
-* **Manual Deploy ([deploy.yml](.github/workflows/deploy.yml)):** Manually triggerable with dropdown environment selection (`prod` or `stage`) and image tag input.
-
-## Troubleshooting
-
-- If `/api/v1/health` returns an error, check PostgreSQL and Redis connectivity first.
-- If readiness fails, inspect `/actuator/health/readiness` for the specific dependency that is down.
-- If the container starts but immediately exits, verify all `INFRAPILOT_*` environment variables are present.
-- If Grafana dashboards are empty, confirm Prometheus can reach `app:8080` or the deployed ALB endpoint.
-- If Flyway fails, check that the PostgreSQL schema is empty or that the migration history table matches the expected version.
-
-Refer to [docs/troubleshooting.md](docs/troubleshooting.md) for the complete SRE diagnostic playbook.
+* **Application URL**: `http://localhost:8080`
+* **Health Endpoint**: `http://localhost:8080/api/v1/health`
+* **Actuator Health**: `http://localhost:8080/actuator/health/readiness`
 
 ---
 
-## 📚 Study & Operations Learning Center
-
-Refer to these guides in the following recommended order to learn DevOps, Cloud engineering, and SRE operations:
-
-1. **[Start Here] [Learning Roadmap](docs/LEARNING_ROADMAP.md):** A step-by-step learning guide, including hands-on activities to practice path-filtering, simulate container crashes, and study advanced Kubernetes/ArgoCD concepts.
-2. **[Architecture Evolution](docs/architecture.md):** Analyzes the local sidecar network pattern and compares **AWS ECS Fargate vs. Kubernetes (EKS)**.
-3. **[CI/CD & GitOps Guide](docs/cicd.md):** Explains pipeline structures and evaluates **Push-based pipelines (GitHub Actions)** against **Pull-based pipelines (ArgoCD)**.
-4. **[SRE Troubleshooting Playbook](docs/troubleshooting.md):** Step-by-step diagnostic CLI commands for container reboots, failing target groups, and connection timeouts.
-5. **[Complete Architectural Deep Dive](docs/architecture_deep_dive.md):** An extensive engineering blueprint analyzing every source code class, Docker stage, Terraform resource, and deployment revision.
+## 📁 Repository Layout
+```text
+infra-pilot-api
+├── .github/workflows/    # CI/CD Workflows (PR Validation, CD Auto, Manual Deploy)
+├── application/          # Core Spring Boot Maven module (Source code & tests)
+├── docker/               # Multi-stage distroless Dockerfile configuration
+├── monitoring/           # Local Prometheus & Grafana configurations
+├── pom.xml               # Parent Maven Project Object Model
+└── README.md             # Software delivery & pipeline documentation
+```
