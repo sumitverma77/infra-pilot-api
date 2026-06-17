@@ -43,3 +43,6 @@ build.log
 # Optional
 apply-output.txt
 build.log
+
+# Documentation (kept locally only)
+docs/
