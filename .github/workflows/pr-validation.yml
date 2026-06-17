@@ -9,7 +9,10 @@ on:
       - 'application/**'
       - 'docker/**'
       - 'pom.xml'
-      - '.github/workflows/pr-validation.yml'
+      - 'mvnw'
+      - 'mvnw.cmd'
+      - '.mvn/**'
+      - '.github/workflows/**'
 
 permissions:
   contents: read
