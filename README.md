@@ -1,33 +1,47 @@
 # InfraPilot
 
-InfraPilot is a production-grade cloud-native backend platform showcase built to demonstrate modern Java backend engineering, AWS infrastructure, CI/CD automation, observability, security, containerization, and operational maturity.
+InfraPilot is a production-grade cloud-native platform showcase built to demonstrate modern Java backend engineering, AWS infrastructure, CI/CD automation, observability, security, and containerization.
 
 It is intentionally not a business application. The API surface is deliberately small so the repository can focus on platform concerns rather than domain complexity.
 
-## What this repository demonstrates
+---
 
-- Java 21 and Spring Boot 3.x
-- Maven-based build and packaging
-- PostgreSQL with Flyway migrations
-- Redis integration and health validation
-- Actuator, Micrometer, Prometheus, JVM metrics, HTTP metrics, database metrics, and Redis metrics
-- Correlation IDs, structured logging, global exception handling, validation, and DTO-based layering
-- Docker, Docker Compose, GitHub Actions, Terraform, ECS Fargate, ECR, ALB, CloudWatch, and Secrets Manager
+## 🚀 What We Achieved & Core Architecture
 
-## API Surface
+With this codebase, we have designed and provisioned a **high-availability, zero-baseline-cost AWS cloud infrastructure** by running PostgreSQL and Redis as sidecar containers inside a serverless ECS Fargate task:
 
-- `GET /api/v1/health`
-- `GET /api/v1/version`
-- `GET /api/v1/info`
-- `GET /api/v1/cache-test`
-- `GET /api/v1/db-test`
+```mermaid
+flowchart LR
+  Internet((Internet)) --> ALB[Application Load Balancer]
+  ALB --> ECS[ECS Fargate Task]
+  
+  subgraph Fargate["Fargate Task (Loopback Network)"]
+    App[Spring Boot App :8080]
+    PostgreSQL[(Postgres Sidecar :5432)]
+    Redis[(Redis Sidecar :6379)]
+    
+    App -->|localhost:5432| PostgreSQL
+    App -->|localhost:6379| Redis
+  end
+```
 
-Actuator endpoints exposed for operations:
+### Core Value Proposition & Achievements:
+* **Zero Database Base Cost:** PostgreSQL and Redis run directly inside the Fargate task memory space, bypassing the high monthly fees of AWS RDS ($15+/mo) and AWS ElastiCache ($15+/mo).
+* **NAT Gateway Avoidance:** By placing Fargate tasks directly in public subnets protected by ingress-restricted Security Groups, we avoid the baseline cost of an AWS NAT Gateway ($32/mo).
+* **Enterprise Security Posture:** Uses a **multi-stage distroless build** containing *only* the compiled application jar and its JDK runtime. No shell, package manager, or system utilities exist inside the container, reducing the remote code execution exploit surface to nearly zero.
+* **Granular CI/CD Triggers:** Integrated path-filtering so pushing markdown or Terraform changes does not trigger Java compiles, keeping build queues fast and cost-efficient.
 
-- `GET /actuator/health`
-- `GET /actuator/info`
-- `GET /actuator/prometheus`
-- `GET /actuator/metrics`
+---
+
+## 🛠️ What You Will Learn From This Repository
+
+Maintaining this repository teaches you critical skills required of **Staff Cloud Engineers** and **SREs**:
+1. **Infrastructure as Code (IaC):** Writing modular, variable-driven Terraform configs, managing resource dependencies, and understanding state lifecycles.
+2. **Docker Optimization:** Using multi-stage caching, distroless images, non-root execution, and Fargate multi-container networking.
+3. **Advanced CI/CD Automation:** Designing branch-to-environment mapping (`main` to `prod`, `stage` to `stage` environment), GitOps practices, and environment parameter injection.
+4. **Cloud Operations & Observability:** Configuring ALB health check target groups, grace periods, CloudWatch logging streams, and Actuator metrics endpoints.
+
+---
 
 ## Architecture Overview
 
@@ -81,13 +95,11 @@ sequenceDiagram
 flowchart TB
   Internet((Internet)) --> ALB[Application Load Balancer]
   ALB --> ECS[ECS Fargate Service]
-  ECS --> Private1[Private Subnet A]
-  ECS --> Private2[Private Subnet B]
-  Private1 --> NAT[NAT Gateway]
-  Private2 --> NAT
-  NAT --> IGW[Internet Gateway]
+  ECS --> Public1[Public Subnet A]
+  ECS --> Public2[Public Subnet B]
+  Public1 --> IGW[Internet Gateway]
+  Public2 --> IGW
   ECS --> Logs[CloudWatch Log Group]
-  ECS --> Secrets[AWS Secrets Manager]
   ECR[Amazon ECR] --> ECS
 ```
 
@@ -113,6 +125,8 @@ infra-pilot
 ├── .github
 └── README.md
 ```
+
+---
 
 ## Local Setup
 
@@ -175,45 +189,31 @@ Default local credentials for Grafana:
 
 Terraform provisions:
 
-- VPC, public subnets, private subnets, route tables, IGW, NAT gateway
+- VPC, 2 public subnets, route tables, IGW
 - Security groups for ALB and ECS tasks
 - ECR repository
 - ECS cluster and Fargate service
-- Application Load Balancer
+- Application Load Balancer & Target Group
 - CloudWatch log group
-- Secrets Manager secrets
 - IAM task execution and task roles
 
-Example:
+See the full step-by-step guide in [docs/terraform.md](docs/terraform.md).
+
+Deploy with minimal inputs:
 
 ```bash
 cd terraform
 terraform init
 terraform plan \
-  -var="container_image=123456789012.dkr.ecr.us-east-1.amazonaws.com/infrapilot:latest" \
-  -var="app_version=1.0.0" \
-  -var="git_commit_sha=abc123" \
-  -var="build_timestamp=2026-06-14T00:00:00Z" \
-  -var="hostname=infrapilot-prod" \
-  -var="runtime_environment=prod" \
-  -var="db_url=jdbc:postgresql://your-postgres.example.com:5432/infrapilot" \
-  -var="db_username=infrapilot" \
-  -var="redis_host=your-redis.example.com"
+  -var="container_image=516292808313.dkr.ecr.us-east-1.amazonaws.com/infrapilot:latest" \
+  -var="app_version=1.0.0"
 ```
-
-### Secrets Manager workflow
-
-Terraform creates empty secret containers. Populate secret values before deployment:
-
-- `database_password`
-- `redis_password`
-- `application_metadata` if you want to store additional runtime metadata
 
 ## AWS Deployment Guide
 
 1. Apply Terraform.
-2. Push an image to ECR.
-3. Trigger the deployment workflow.
+2. Push your Spring Boot Docker image to ECR.
+3. Trigger the deployment workflow in GitHub Actions.
 4. Confirm the ECS service reaches `stable`.
 5. Verify `/actuator/health/readiness` and `/api/v1/health` through the ALB.
 
@@ -227,7 +227,7 @@ Terraform creates empty secret containers. Populate secret values before deploym
 
 ### Rollback
 
-- Re-run the deployment workflow with the previous image tag.
+- Re-run the deployment workflow in GitHub Actions with the previous image tag.
 - Or update the ECS service to the prior task definition revision.
 - ECS and ALB health checks will drain unhealthy tasks before routing traffic to the reverted revision.
 
@@ -247,33 +247,12 @@ Dashboards included:
 
 ## CI/CD Guide
 
-### PR validation
+We have set up an automated GitOps and SRE validation pipeline:
 
-The PR workflow runs:
-
-- Build
-- Unit tests
-- Integration tests
-- Coverage report generation
-
-### Build and push
-
-The main branch workflow:
-
-- Builds the application jar
-- Builds the Docker image
-- Tags the image with the git commit SHA
-- Pushes the image to Amazon ECR
-
-### Deployment
-
-The deployment workflow:
-
-- Pulls the current ECS task definition
-- Registers a new revision with the target image
-- Updates the ECS service
-- Waits for stability
-- Verifies health checks against the ALB
+* **PR Validation ([pr-validation.yml](.github/workflows/pr-validation.yml)):** Runs on PR pushes modifying Java files. Sets up Postgres/Redis test containers, compiles the project, and runs verify checks.
+* **Terraform Check ([terraform-check.yml](.github/workflows/terraform-check.yml)):** Runs on pushes modifying `terraform/**`. Validates code formatting and syntax checks.
+* **Auto Deployment ([ci-cd-auto.yml](.github/workflows/ci-cd-auto.yml)):** Automatically builds, tags, pushes the image to ECR, and deploys the new revision to ECS Fargate on pushes to `main` (for `prod`) and `stage` (for `stage`).
+* **Manual Deploy ([deploy.yml](.github/workflows/deploy.yml)):** Manually triggerable with dropdown environment selection (`prod` or `stage`) and image tag input.
 
 ## Troubleshooting
 
@@ -283,6 +262,16 @@ The deployment workflow:
 - If Grafana dashboards are empty, confirm Prometheus can reach `app:8080` or the deployed ALB endpoint.
 - If Flyway fails, check that the PostgreSQL schema is empty or that the migration history table matches the expected version.
 
-## Documentation
+Refer to [docs/troubleshooting.md](docs/troubleshooting.md) for the complete SRE diagnostic playbook.
 
-Additional supporting notes live in `docs/`.
+---
+
+## 📚 Study & Operations Learning Center
+
+Refer to these guides in the following recommended order to learn DevOps, Cloud engineering, and SRE operations:
+
+1. **[Start Here] [Learning Roadmap](docs/LEARNING_ROADMAP.md):** A step-by-step learning guide, including hands-on activities to practice path-filtering, simulate container crashes, and study advanced Kubernetes/ArgoCD concepts.
+2. **[Architecture Evolution](docs/architecture.md):** Analyzes the local sidecar network pattern and compares **AWS ECS Fargate vs. Kubernetes (EKS)**.
+3. **[CI/CD & GitOps Guide](docs/cicd.md):** Explains pipeline structures and evaluates **Push-based pipelines (GitHub Actions)** against **Pull-based pipelines (ArgoCD)**.
+4. **[SRE Troubleshooting Playbook](docs/troubleshooting.md):** Step-by-step diagnostic CLI commands for container reboots, failing target groups, and connection timeouts.
+5. **[Complete Architectural Deep Dive](docs/architecture_deep_dive.md):** An extensive engineering blueprint analyzing every source code class, Docker stage, Terraform resource, and deployment revision.
