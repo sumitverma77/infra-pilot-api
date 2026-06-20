@@ -80,9 +80,9 @@ logging:
     com.sumitverma.infrapilot: INFO
 
 infrapilot:
-  app-name: ${INFRAPILOT_APP_NAME}
-  app-version: ${INFRAPILOT_APP_VERSION}
-  git-commit-sha: ${INFRAPILOT_GIT_COMMIT_SHA}
-  build-timestamp: ${INFRAPILOT_BUILD_TIMESTAMP}
-  hostname: ${INFRAPILOT_HOSTNAME}
-  environment: ${INFRAPILOT_ENVIRONMENT}
+  app-name: ${INFRAPILOT_APP_NAME:InfraPilot}
+  app-version: ${INFRAPILOT_APP_VERSION:unknown}
+  git-commit-sha: ${INFRAPILOT_GIT_COMMIT_SHA:unknown}
+  build-timestamp: ${INFRAPILOT_BUILD_TIMESTAMP:unknown}
+  hostname: ${HOSTNAME:unknown}
+  environment: ${SPRING_PROFILES_ACTIVE:default}

@@ -59,14 +59,16 @@ jobs:
         run: mvn -B clean package -DskipTests
 
       - name: Build and push image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          docker build -f docker/Dockerfile -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" -t "$ECR_REGISTRY/$ECR_REPOSITORY:latest" .
-          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }},${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:latest
+          build-args: |
+            COMMIT_SHA=${{ github.sha }}
+            APP_VERSION=${{ github.run_number }}
+            BUILD_TIMESTAMP=${{ github.run_started_at }}
 
   deploy:
     runs-on: ubuntu-latest
