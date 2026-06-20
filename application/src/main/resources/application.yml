@@ -26,7 +26,7 @@ spring:
         jdbc:
           time_zone: UTC
   flyway:
-    enabled: true
+    enabled: false
     locations: classpath:db/migration
   lifecycle:
     timeout-per-shutdown-phase: 30s
@@ -56,7 +56,7 @@ management:
         liveness:
           include: livenessState
         readiness:
-          include: readinessState,db,redis
+          include: readinessState
     metrics:
       enabled: true
   health:

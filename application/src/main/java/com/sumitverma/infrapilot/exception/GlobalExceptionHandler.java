@@ -4,7 +4,7 @@ import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.MDC;
-import org.springframework.dao.DataAccessException;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.validation.FieldError;
@@ -30,14 +30,6 @@ public class GlobalExceptionHandler {
         return problemDetail;
     }
 
-    @ExceptionHandler(DataAccessException.class)
-    public ProblemDetail handleDataAccess(DataAccessException exception) {
-        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, "Database or cache access failed");
-        problemDetail.setType(URI.create("https://sumitverma.com/problems/data-access-error"));
-        problemDetail.setTitle("Infrastructure dependency unavailable");
-        enrich(problemDetail);
-        return problemDetail;
-    }
 
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleGeneric(Exception exception) {
