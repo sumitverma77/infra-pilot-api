@@ -1,4 +1,4 @@
-name: Deploy to ECS
+name: Deploy to ECS (Manual)
 
 on:
   workflow_dispatch:
@@ -18,6 +18,7 @@ on:
         default: latest
 
 permissions:
+  id-token: write
   contents: read
 
 jobs:
@@ -26,74 +27,54 @@ jobs:
     environment: ${{ inputs.environment }}
 
     steps:
-      - name: Configure AWS credentials
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Resolve Environment Configuration
-        run: |
-          if [ "${{ inputs.environment }}" = "prod" ]; then
-            echo "ECS_CLUSTER=${{ vars.PROD_ECS_CLUSTER }}" >> "$GITHUB_ENV"
-            echo "ECS_SERVICE=${{ vars.PROD_ECS_SERVICE }}" >> "$GITHUB_ENV"
-            echo "TASK_DEF_FAMILY=${{ vars.PROD_TASK_DEF_FAMILY }}" >> "$GITHUB_ENV"
-            echo "ECR_REPOSITORY=infrapilot-prod" >> "$GITHUB_ENV"
-            ALB_NAME="${{ vars.PROD_ALB_NAME }}"
-          else
-            echo "ECS_CLUSTER=${{ vars.STAGE_ECS_CLUSTER }}" >> "$GITHUB_ENV"
-            echo "ECS_SERVICE=${{ vars.STAGE_ECS_SERVICE }}" >> "$GITHUB_ENV"
-            echo "TASK_DEF_FAMILY=${{ vars.STAGE_TASK_DEF_FAMILY }}" >> "$GITHUB_ENV"
-            echo "ECR_REPOSITORY=infrapilot-stage" >> "$GITHUB_ENV"
-            ALB_NAME="${{ vars.STAGE_ALB_NAME }}"
-          fi
-          
-          # Dynamically fetch ALB DNS Name from AWS to handle recreation/random suffixes
-          ALB_DNS_NAME=$(aws elbv2 describe-load-balancers --names "$ALB_NAME" --query "LoadBalancers[0].DNSName" --output text)
-          echo "ALB_DNS_NAME=$ALB_DNS_NAME" >> "$GITHUB_ENV"
-          
-          echo "CONTAINER_NAME=infrapilot" >> "$GITHUB_ENV"
-          echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> "$GITHUB_ENV"
-
-      - name: Describe current task definition
+      - name: Download active task definition
         run: |
           aws ecs describe-task-definition \
-            --task-definition "$TASK_DEF_FAMILY" \
+            --task-definition "${{ vars.TASK_DEF_FAMILY }}" \
             --query taskDefinition > task-def.json
 
-      - name: Render new task definition revision
+      - name: Render new task definition revision (Mutate App Image Only)
+        env:
+          IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ inputs.image_tag }}
+          CONTAINER_NAME: ${{ vars.SERVICE_NAME }}
         run: |
-          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:${{ inputs.image_tag }}"
-          
           jq --arg img "$IMAGE_URI" \
              --arg name "$CONTAINER_NAME" \
              'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy,.deregisteredAt)
               | .containerDefinitions |= map(if .name == $name then .image = $img else . end)' \
              task-def.json > task-def-rendered.json
-          
-          aws ecs register-task-definition --cli-input-json file://task-def-rendered.json > task-def-register.json
-          echo "TASK_DEFINITION_ARN=$(jq -r '.taskDefinition.taskDefinitionArn' task-def-register.json)" >> "$GITHUB_ENV"
 
-      - name: Update ECS service
+      - name: Register task definition & Update ECS service
         run: |
+          aws ecs register-task-definition --cli-input-json file://task-def-rendered.json > task-def-register.json
+          TASK_DEFINITION_ARN=$(jq -r '.taskDefinition.taskDefinitionArn' task-def-register.json)
+          
           aws ecs update-service \
-            --cluster "$ECS_CLUSTER" \
-            --service "$ECS_SERVICE" \
+            --cluster "${{ vars.ECS_CLUSTER }}" \
+            --service "${{ vars.SERVICE_NAME }}" \
             --task-definition "$TASK_DEFINITION_ARN" \
             --force-new-deployment
 
       - name: Wait for service stability
         run: |
           aws ecs wait services-stable \
-            --cluster "$ECS_CLUSTER" \
-            --services "$ECS_SERVICE"
+            --cluster "${{ vars.ECS_CLUSTER }}" \
+            --services "${{ vars.SERVICE_NAME }}"
 
-      - name: Verify health checks
+      - name: Verify dynamic health checks
         run: |
-          curl -fsS "http://$ALB_DNS_NAME/actuator/health/readiness"
-          curl -fsS "http://$ALB_DNS_NAME/api/v1/health"
+          ALB_DNS_NAME=$(aws elbv2 describe-load-balancers --names "${{ vars.ALB_NAME }}" --query "LoadBalancers[0].DNSName" --output text)
+          curl -fsS "http://$ALB_DNS_NAME${{ vars.HEALTH_CHECK_PATH }}"
