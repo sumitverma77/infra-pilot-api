@@ -12,31 +12,31 @@ Our software delivery lifecycle is governed by automated pipelines in `.github/w
 
 ```mermaid
 flowchart TD
-  Developer[Developer pushes code] --> Trigger{Branch Target}
+  Developer["Developer pushes code"] --> Trigger{"Branch Target"}
   
-  Trigger -->|Pull Request| CI[1. PR Validation Pipeline]
-  Trigger -->|Push to stage| CDStage[2. CD to Staging]
-  Trigger -->|Push to main| CDProd[3. CD to Production]
+  Trigger -->|Pull Request| CI["1. PR Validation Pipeline"]
+  Trigger -->|Push to stage| CDStage["2. CD to Staging"]
+  Trigger -->|Push to main| CDProd["3. CD to Production"]
   
   subgraph CI_Pipeline ["PR Validation CI"]
-    CI --> Setup[Setup Java 21 & Maven Cache]
-    Setup --> Verify[mvn clean verify]
-    Verify --> Coverage[JaCoCo Test Coverage Report]
+    CI --> Setup["Setup Java 21 & Maven Cache"]
+    Setup --> Verify["mvn clean verify"]
+    Verify --> Coverage["JaCoCo Test Coverage Report"]
   end
 
   subgraph CD_Pipeline ["Continuous Deployment CD"]
-    CDStage --> OIDC[Authenticate to AWS via OIDC]
-    CDProd --> OIDC[Authenticate to AWS via OIDC]
+    CDStage --> OIDC["Authenticate to AWS via OIDC"]
+    CDProd --> OIDC["Authenticate to AWS via OIDC"]
     
-    OIDC --> BuildP[Build & Package JAR]
-    BuildP --> DockerP[Docker Build & Inject Version Args]
+    OIDC --> BuildP["Build & Package JAR"]
+    BuildP --> DockerP["Docker Build & Inject Version Args"]
     
-    DockerP --> Parse[Parse deploy/*.yaml Manifests]
-    Parse --> JQ[Mutate ECS Task via jq (CPU/Mem/Replicas)]
-    JQ --> ECSP[Update ECS Service]
+    DockerP --> Parse["Parse deploy/*.yaml Manifests"]
+    Parse --> JQ["Mutate ECS Task via jq (CPU/Mem/Replicas)"]
+    JQ --> ECSP["Update ECS Service"]
     
-    ECSP --> QueryP[Dynamic ALB DNS Resolution]
-    QueryP --> HealthP[Health Check Actuator Verify]
+    ECSP --> QueryP["Dynamic ALB DNS Resolution"]
+    QueryP --> HealthP["Health Check Actuator Verify"]
   end
 ```
 
