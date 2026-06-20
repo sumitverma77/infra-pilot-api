@@ -11,13 +11,10 @@ public class ApplicationMetadataProperties {
     @NotBlank
     private String appName;
 
-    @NotBlank
     private String appVersion;
 
-    @NotBlank
     private String gitCommitSha;
 
-    @NotBlank
     private String buildTimestamp;
 
     @NotBlank
