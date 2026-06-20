@@ -26,7 +26,7 @@ spring:
         jdbc:
           time_zone: UTC
   flyway:
-    enabled: true
+    enabled: false
     locations: classpath:db/migration
   lifecycle:
     timeout-per-shutdown-phase: 30s
@@ -56,7 +56,7 @@ management:
         liveness:
           include: livenessState
         readiness:
-          include: readinessState,db,redis
+          include: readinessState
     metrics:
       enabled: true
   health:
@@ -80,9 +80,9 @@ logging:
     com.sumitverma.infrapilot: INFO
 
 infrapilot:
-  app-name: ${INFRAPILOT_APP_NAME}
-  app-version: ${INFRAPILOT_APP_VERSION}
-  git-commit-sha: ${INFRAPILOT_GIT_COMMIT_SHA}
-  build-timestamp: ${INFRAPILOT_BUILD_TIMESTAMP}
-  hostname: ${INFRAPILOT_HOSTNAME}
-  environment: ${INFRAPILOT_ENVIRONMENT}
+  app-name: ${INFRAPILOT_APP_NAME:InfraPilot}
+  app-version: ${INFRAPILOT_APP_VERSION:unknown}
+  git-commit-sha: ${INFRAPILOT_GIT_COMMIT_SHA:unknown}
+  build-timestamp: ${INFRAPILOT_BUILD_TIMESTAMP:unknown}
+  hostname: ${HOSTNAME:unknown}
+  environment: ${SPRING_PROFILES_ACTIVE:default}

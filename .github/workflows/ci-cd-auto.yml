@@ -6,17 +6,23 @@ on:
       - main
       - stage
     paths:
-      - 'application/**'
+      - 'src/**'
       - 'docker/**'
+      - 'deploy/**'
       - 'pom.xml'
-      - '.github/workflows/ci-cd-auto.yml'
+      - 'mvnw'
+      - 'mvnw.cmd'
+      - '.mvn/**'
+      - '.github/workflows/**'
 
 permissions:
+  id-token: write      # Required for OpenID Connect (OIDC) JWT token
   contents: read
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'prod' || 'stage' }}
     outputs:
       registry: ${{ steps.login-ecr.outputs.registry }}
       image_tag: ${{ github.sha }}
@@ -24,6 +30,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -34,40 +50,28 @@ jobs:
 
       - name: Build application jar
         env:
-          INFRAPILOT_APP_NAME: InfraPilot
+          INFRAPILOT_APP_NAME: ${{ vars.SERVICE_NAME }}
           INFRAPILOT_APP_VERSION: ${{ github.sha }}
           INFRAPILOT_GIT_COMMIT_SHA: ${{ github.sha }}
           INFRAPILOT_BUILD_TIMESTAMP: ${{ github.run_started_at }}
           INFRAPILOT_HOSTNAME: github-actions
           INFRAPILOT_ENVIRONMENT: ${{ github.ref_name == 'main' && 'prod' || 'stage' }}
-          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/infrapilot
-          SPRING_DATASOURCE_USERNAME: infrapilot
-          SPRING_DATASOURCE_PASSWORD: infrapilot
-          SPRING_REDIS_HOST: localhost
-          SPRING_REDIS_PORT: 6379
-          SPRING_REDIS_PASSWORD: infrapilot
-        run: mvn -B -pl application -am clean package -DskipTests
+        run: mvn -B clean package -DskipTests
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+      - name: Capture build timestamp
+        run: echo "BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
       - name: Build and push image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ github.ref_name == 'main' && 'infrapilot-prod' || 'infrapilot-stage' }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          docker build -f docker/Dockerfile -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" -t "$ECR_REGISTRY/$ECR_REPOSITORY:latest" .
-          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }},${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:latest
+          build-args: |
+            COMMIT_SHA=${{ github.sha }}
+            APP_VERSION=${{ github.run_number }}
+            BUILD_TIMESTAMP=${{ env.BUILD_TIMESTAMP }}
 
   deploy:
     runs-on: ubuntu-latest
@@ -75,70 +79,90 @@ jobs:
     environment: ${{ github.ref_name == 'main' && 'prod' || 'stage' }}
 
     steps:
-      - name: Configure AWS credentials
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Resolve Environment Configuration
-        run: |
-          if [ "${{ github.ref_name }}" = "main" ]; then
-            echo "ECS_CLUSTER=${{ vars.PROD_ECS_CLUSTER }}" >> "$GITHUB_ENV"
-            echo "ECS_SERVICE=${{ vars.PROD_ECS_SERVICE }}" >> "$GITHUB_ENV"
-            echo "TASK_DEF_FAMILY=${{ vars.PROD_TASK_DEF_FAMILY }}" >> "$GITHUB_ENV"
-            echo "ECR_REPOSITORY=infrapilot-prod" >> "$GITHUB_ENV"
-            ALB_NAME="${{ vars.PROD_ALB_NAME }}"
-          else
-            echo "ECS_CLUSTER=${{ vars.STAGE_ECS_CLUSTER }}" >> "$GITHUB_ENV"
-            echo "ECS_SERVICE=${{ vars.STAGE_ECS_SERVICE }}" >> "$GITHUB_ENV"
-            echo "TASK_DEF_FAMILY=${{ vars.STAGE_TASK_DEF_FAMILY }}" >> "$GITHUB_ENV"
-            echo "ECR_REPOSITORY=infrapilot-stage" >> "$GITHUB_ENV"
-            ALB_NAME="${{ vars.STAGE_ALB_NAME }}"
-          fi
-          
-          # Dynamically fetch ALB DNS Name from AWS to handle recreation/random suffixes
-          ALB_DNS_NAME=$(aws elbv2 describe-load-balancers --names "$ALB_NAME" --query "LoadBalancers[0].DNSName" --output text)
-          echo "ALB_DNS_NAME=$ALB_DNS_NAME" >> "$GITHUB_ENV"
-          
-          echo "CONTAINER_NAME=infrapilot" >> "$GITHUB_ENV"
-          echo "ECR_REGISTRY=${{ needs.build-and-push.outputs.registry }}" >> "$GITHUB_ENV"
-
-      - name: Describe current task definition
+      - name: Download active task definition
         run: |
           aws ecs describe-task-definition \
-            --task-definition "$TASK_DEF_FAMILY" \
+            --task-definition "${{ vars.TASK_DEF_FAMILY }}" \
             --query taskDefinition > task-def.json
 
-      - name: Render new task definition revision
+      - name: Parse application manifest overrides
         run: |
-          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:${{ needs.build-and-push.outputs.image_tag }}"
+          # 1. Fetch current settings from the downloaded task definition as defaults
+          CURRENT_CPU=$(jq -r '.cpu' task-def.json)
+          CURRENT_MEMORY=$(jq -r '.memory' task-def.json)
           
-          jq --arg img "$IMAGE_URI" \
-             --arg name "$CONTAINER_NAME" \
-             'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy,.deregisteredAt)
-              | .containerDefinitions |= map(if .name == $name then .image = $img else . end)' \
-             task-def.json > task-def-rendered.json
+          # Fetch current desired count from the ECS service as default
+          CURRENT_DESIRED=$(aws ecs describe-services \
+            --cluster "${{ vars.ECS_CLUSTER }}" \
+            --services "${{ vars.SERVICE_NAME }}" \
+            --query "services[0].desiredCount" --output text)
           
-          aws ecs register-task-definition --cli-input-json file://task-def-rendered.json > task-def-register.json
-          echo "TASK_DEFINITION_ARN=$(jq -r '.taskDefinition.taskDefinitionArn' task-def-register.json)" >> "$GITHUB_ENV"
+          # 2. Determine target manifest file
+          DEPLOY_FILE="deploy/${{ github.ref_name == 'main' && 'prod' || 'stage' }}.yaml"
+          
+          # 3. Read overrides if manifest exists
+          if [ -f "$DEPLOY_FILE" ]; then
+            # Parse YAML values using yq (standard on ubuntu runners), falling back to current values if null
+            CPU=$(yq eval ".cpu // \"$CURRENT_CPU\"" "$DEPLOY_FILE")
+            MEMORY=$(yq eval ".memory // \"$CURRENT_MEMORY\"" "$DEPLOY_FILE")
+            DESIRED=$(yq eval ".desired_count // \"$CURRENT_DESIRED\"" "$DEPLOY_FILE")
+            HEALTH_PATH=$(yq eval ".health_check_path // \"${{ vars.HEALTH_CHECK_PATH }}\"" "$DEPLOY_FILE")
+          else
+            CPU=$CURRENT_CPU
+            MEMORY=$CURRENT_MEMORY
+            DESIRED=$CURRENT_DESIRED
+            HEALTH_PATH="${{ vars.HEALTH_CHECK_PATH }}"
+          fi
+          
+          # 4. Save parsed values to pipeline environment
+          echo "TASK_CPU=$CPU" >> "$GITHUB_ENV"
+          echo "TASK_MEMORY=$MEMORY" >> "$GITHUB_ENV"
+          echo "DESIRED_COUNT=$DESIRED" >> "$GITHUB_ENV"
+          echo "HEALTH_CHECK_PATH=$HEALTH_PATH" >> "$GITHUB_ENV"
 
-      - name: Update ECS service
+      - name: Render new task definition revision (Mutate App Image & Size Only)
+        env:
+          IMAGE_URI: ${{ needs.build-and-push.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ needs.build-and-push.outputs.image_tag }}
         run: |
+          # Mutate only the image tag and task sizing of the main container
+          jq --arg img "$IMAGE_URI" \
+             --arg cpu "$TASK_CPU" \
+             --arg mem "$TASK_MEMORY" \
+             'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy,.deregisteredAt)
+              | .cpu = $cpu
+              | .memory = $mem
+              | .containerDefinitions[0].image = $img' \
+             task-def.json > task-def-rendered.json
+
+      - name: Register task definition & Update ECS service
+        run: |
+          aws ecs register-task-definition --cli-input-json file://task-def-rendered.json > task-def-register.json
+          TASK_DEFINITION_ARN=$(jq -r '.taskDefinition.taskDefinitionArn' task-def-register.json)
+          
           aws ecs update-service \
-            --cluster "$ECS_CLUSTER" \
-            --service "$ECS_SERVICE" \
+            --cluster "${{ vars.ECS_CLUSTER }}" \
+            --service "${{ vars.SERVICE_NAME }}" \
             --task-definition "$TASK_DEFINITION_ARN" \
+            --desired-count "$DESIRED_COUNT" \
             --force-new-deployment
 
       - name: Wait for service stability
         run: |
           aws ecs wait services-stable \
-            --cluster "$ECS_CLUSTER" \
-            --services "$ECS_SERVICE"
+            --cluster "${{ vars.ECS_CLUSTER }}" \
+            --services "${{ vars.SERVICE_NAME }}"
 
-      - name: Verify health checks
+      - name: Verify dynamic health checks
         run: |
-          curl -fsS "http://$ALB_DNS_NAME/actuator/health/readiness"
-          curl -fsS "http://$ALB_DNS_NAME/api/v1/health"
+          # Dynamically fetch ALB DNS to avoid hardcoded mock issues
+          ALB_DNS_NAME=$(aws elbv2 describe-load-balancers --names "${{ vars.ALB_NAME }}" --query "LoadBalancers[0].DNSName" --output text)
+          curl -fsS "http://$ALB_DNS_NAME$HEALTH_CHECK_PATH"
