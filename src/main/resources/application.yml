@@ -1,33 +1,7 @@
 spring:
   application:
     name: ${INFRAPILOT_APP_NAME:InfraPilot}
-  datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/infrapilot}
-    username: ${SPRING_DATASOURCE_USERNAME:infrapilot}
-    password: ${SPRING_DATASOURCE_PASSWORD:infrapilot}
-    driver-class-name: org.postgresql.Driver
-    hikari:
-      maximum-pool-size: 10
-      minimum-idle: 2
-      connection-timeout: 30000
-  data:
-    redis:
-      host: ${SPRING_REDIS_HOST:localhost}
-      port: ${SPRING_REDIS_PORT:6379}
-      password: ${SPRING_REDIS_PASSWORD:}
-      timeout: 2s
-  jpa:
-    open-in-view: false
-    hibernate:
-      ddl-auto: validate
-    properties:
-      hibernate:
-        format_sql: true
-        jdbc:
-          time_zone: UTC
-  flyway:
-    enabled: false
-    locations: classpath:db/migration
+
   lifecycle:
     timeout-per-shutdown-phase: 30s
   main:
@@ -59,11 +33,7 @@ management:
           include: readinessState
     metrics:
       enabled: true
-  health:
-    redis:
-      enabled: true
-    db:
-      enabled: true
+
 
 info:
   app:
