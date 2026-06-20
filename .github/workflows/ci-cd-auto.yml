@@ -127,17 +127,15 @@ jobs:
       - name: Render new task definition revision (Mutate App Image & Size Only)
         env:
           IMAGE_URI: ${{ needs.build-and-push.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ needs.build-and-push.outputs.image_tag }}
-          CONTAINER_NAME: ${{ vars.SERVICE_NAME }}
         run: |
-          # Mutate only the image tag and task sizing, leaving other settings/containers intact
+          # Mutate only the image tag and task sizing of the main container
           jq --arg img "$IMAGE_URI" \
-             --arg name "$CONTAINER_NAME" \
              --arg cpu "$TASK_CPU" \
              --arg mem "$TASK_MEMORY" \
              'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy,.deregisteredAt)
               | .cpu = $cpu
               | .memory = $mem
-              | .containerDefinitions |= map(if .name == $name then .image = $img else . end)' \
+              | .containerDefinitions[0].image = $img' \
              task-def.json > task-def-rendered.json
 
       - name: Register task definition & Update ECS service
