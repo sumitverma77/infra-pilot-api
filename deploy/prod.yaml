@@ -1,5 +1,5 @@
 # Production Deployment Configuration (Production environment default sizes)
-cpu: 512
-memory: 1024
-desired_count: 2
+cpu: 256
+memory: 512
+desired_count: 1
 health_check_path: "/actuator/health/readiness"
