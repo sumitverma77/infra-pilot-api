@@ -58,6 +58,9 @@ jobs:
           INFRAPILOT_ENVIRONMENT: ${{ github.ref_name == 'main' && 'prod' || 'stage' }}
         run: mvn -B clean package -DskipTests
 
+      - name: Capture build timestamp
+        run: echo "BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Build and push image
         uses: docker/build-push-action@v5
         with:
@@ -68,7 +71,7 @@ jobs:
           build-args: |
             COMMIT_SHA=${{ github.sha }}
             APP_VERSION=${{ github.run_number }}
-            BUILD_TIMESTAMP=${{ github.run_started_at }}
+            BUILD_TIMESTAMP=${{ env.BUILD_TIMESTAMP }}
 
   deploy:
     runs-on: ubuntu-latest
