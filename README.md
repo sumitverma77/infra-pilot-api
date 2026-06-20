@@ -18,26 +18,36 @@ flowchart TD
   Trigger -->|Push to stage| CDStage["2. CD to Staging"]
   Trigger -->|Push to main| CDProd["3. CD to Production"]
   
-  subgraph CI_Pipeline ["PR Validation CI"]
-    CI --> Setup["Setup Java 21 & Maven Cache"]
-    Setup --> Verify["mvn clean verify"]
-    Verify --> Coverage["JaCoCo Test Coverage Report"]
+  subgraph CI_Pipeline [PR Validation CI]
+    Setup["Setup Java 21 & Maven Cache"]
+    Verify["mvn clean verify"]
+    Coverage["JaCoCo Test Coverage Report"]
   end
 
-  subgraph CD_Pipeline ["Continuous Deployment CD"]
-    CDStage --> OIDC["Authenticate to AWS via OIDC"]
-    CDProd --> OIDC["Authenticate to AWS via OIDC"]
-    
-    OIDC --> BuildP["Build & Package JAR"]
-    BuildP --> DockerP["Docker Build & Inject Version Args"]
-    
-    DockerP --> Parse["Parse deploy/*.yaml Manifests"]
-    Parse --> JQ["Mutate ECS Task via jq (CPU/Mem/Replicas)"]
-    JQ --> ECSP["Update ECS Service"]
-    
-    ECSP --> QueryP["Dynamic ALB DNS Resolution"]
-    QueryP --> HealthP["Health Check Actuator Verify"]
+  subgraph CD_Pipeline [Continuous Deployment CD]
+    OIDC["Authenticate to AWS via OIDC"]
+    BuildP["Build & Package JAR"]
+    DockerP["Docker Build & Inject Version Args"]
+    Parse["Parse deploy/*.yaml Manifests"]
+    JQ["Mutate ECS Task via jq (CPU/Mem/Replicas)"]
+    ECSP["Update ECS Service"]
+    QueryP["Dynamic ALB DNS Resolution"]
+    HealthP["Health Check Actuator Verify"]
   end
+
+  CI --> Setup
+  Setup --> Verify
+  Verify --> Coverage
+
+  CDStage --> OIDC
+  CDProd --> OIDC
+  OIDC --> BuildP
+  BuildP --> DockerP
+  DockerP --> Parse
+  Parse --> JQ
+  JQ --> ECSP
+  ECSP --> QueryP
+  QueryP --> HealthP
 ```
 
 ### 1. PR Validation Pipeline (`pr-validation.yml`)
