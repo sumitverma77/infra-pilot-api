@@ -8,6 +8,7 @@ on:
     paths:
       - 'application/**'
       - 'docker/**'
+      - 'deploy/**'
       - 'pom.xml'
       - 'mvnw'
       - 'mvnw.cmd'
@@ -88,15 +89,54 @@ jobs:
             --task-definition "${{ vars.TASK_DEF_FAMILY }}" \
             --query taskDefinition > task-def.json
 
-      - name: Render new task definition revision (Mutate App Image Only)
+      - name: Parse application manifest overrides
+        run: |
+          # 1. Fetch current settings from the downloaded task definition as defaults
+          CURRENT_CPU=$(jq -r '.cpu' task-def.json)
+          CURRENT_MEMORY=$(jq -r '.memory' task-def.json)
+          
+          # Fetch current desired count from the ECS service as default
+          CURRENT_DESIRED=$(aws ecs describe-services \
+            --cluster "${{ vars.ECS_CLUSTER }}" \
+            --services "${{ vars.SERVICE_NAME }}" \
+            --query "services[0].desiredCount" --output text)
+          
+          # 2. Determine target manifest file
+          DEPLOY_FILE="deploy/${{ github.ref_name == 'main' && 'prod' || 'stage' }}.yaml"
+          
+          # 3. Read overrides if manifest exists
+          if [ -f "$DEPLOY_FILE" ]; then
+            # Parse YAML values using yq (standard on ubuntu runners), falling back to current values if null
+            CPU=$(yq eval ".cpu // \"$CURRENT_CPU\"" "$DEPLOY_FILE")
+            MEMORY=$(yq eval ".memory // \"$CURRENT_MEMORY\"" "$DEPLOY_FILE")
+            DESIRED=$(yq eval ".desired_count // \"$CURRENT_DESIRED\"" "$DEPLOY_FILE")
+            HEALTH_PATH=$(yq eval ".health_check_path // \"${{ vars.HEALTH_CHECK_PATH }}\"" "$DEPLOY_FILE")
+          else
+            CPU=$CURRENT_CPU
+            MEMORY=$CURRENT_MEMORY
+            DESIRED=$CURRENT_DESIRED
+            HEALTH_PATH="${{ vars.HEALTH_CHECK_PATH }}"
+          fi
+          
+          # 4. Save parsed values to pipeline environment
+          echo "TASK_CPU=$CPU" >> "$GITHUB_ENV"
+          echo "TASK_MEMORY=$MEMORY" >> "$GITHUB_ENV"
+          echo "DESIRED_COUNT=$DESIRED" >> "$GITHUB_ENV"
+          echo "HEALTH_CHECK_PATH=$HEALTH_PATH" >> "$GITHUB_ENV"
+
+      - name: Render new task definition revision (Mutate App Image & Size Only)
         env:
           IMAGE_URI: ${{ needs.build-and-push.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ needs.build-and-push.outputs.image_tag }}
           CONTAINER_NAME: ${{ vars.SERVICE_NAME }}
         run: |
-          # Mutate only the image tag for the app container, leaving other settings/containers intact
+          # Mutate only the image tag and task sizing, leaving other settings/containers intact
           jq --arg img "$IMAGE_URI" \
              --arg name "$CONTAINER_NAME" \
+             --arg cpu "$TASK_CPU" \
+             --arg mem "$TASK_MEMORY" \
              'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy,.deregisteredAt)
+              | .cpu = $cpu
+              | .memory = $mem
               | .containerDefinitions |= map(if .name == $name then .image = $img else . end)' \
              task-def.json > task-def-rendered.json
 
@@ -109,6 +149,7 @@ jobs:
             --cluster "${{ vars.ECS_CLUSTER }}" \
             --service "${{ vars.SERVICE_NAME }}" \
             --task-definition "$TASK_DEFINITION_ARN" \
+            --desired-count "$DESIRED_COUNT" \
             --force-new-deployment
 
       - name: Wait for service stability
@@ -121,4 +162,4 @@ jobs:
         run: |
           # Dynamically fetch ALB DNS to avoid hardcoded mock issues
           ALB_DNS_NAME=$(aws elbv2 describe-load-balancers --names "${{ vars.ALB_NAME }}" --query "LoadBalancers[0].DNSName" --output text)
-          curl -fsS "http://$ALB_DNS_NAME${{ vars.HEALTH_CHECK_PATH }}"
+          curl -fsS "http://$ALB_DNS_NAME$HEALTH_CHECK_PATH"

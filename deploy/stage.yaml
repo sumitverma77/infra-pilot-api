@@ -1,0 +1,5 @@
+# Staging Deployment Configuration (Staging environment default sizes)
+cpu: 256
+memory: 512
+desired_count: 1
+health_check_path: "/actuator/health/readiness"
